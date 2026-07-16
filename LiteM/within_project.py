@@ -8,6 +8,14 @@ import pandas as pd
 from imblearn.over_sampling import SMOTE, ADASYN
 from imblearn.under_sampling import RandomUnderSampler, TomekLinks, EditedNearestNeighbours
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBoostClassifier  # <-- Added ET, ADA
+from xgboost import XGBClassifier
+from sklearn.svm import SVC                                                                     # <-- Added SVM
+from sklearn.neighbors import KNeighborsClassifier                                              # <-- Added KNN
+from sklearn.neural_network import MLPClassifier                                                # <-- Added MLP
 from ASMOTE import ASMOTE, NoSMOTE
 import numpy as np
 import scipy.io as sio
@@ -19,7 +27,8 @@ def get_parser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--technique', choices=['ADASYN', 'ASMOTE', 'NoSMOTE', 'SMOTE', 'RUS', 'TL', 'ENN'], default='ENN', help='Data augmentation technique to use')
-    parser.add_argument('--classifier', type=str, choices=['LightGBM', 'DecisionTree'], default='LightGBM')    
+    # <-- Updated choices to include the 5 new models: SVM, KNN, ET, ADA, MLP
+    parser.add_argument('--classifier', type=str, choices=['LightGBM', 'DecisionTree', 'LogisticRegression', 'RF', 'XGB', 'SVM', 'KNN', 'ET', 'ADA', 'MLP'], default='LightGBM')    
     parser.add_argument('--label_column_name', type=str, default='CommentsAssociatedLabel')
     parser.add_argument('--random_state', type=int, default=1)
 
@@ -53,21 +62,58 @@ def ten_folds(file_name, level, k_fold=10):
     feature_importances = []
     AUCs = []
     MCCs = []
-    X = X.fillna(-1)
+    
     for train_index, test_index in skf.split(X, y):
         # label evenly distributed
         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-        # init classifier
+        # <-- Updated main classifier initialization logic with 5 new models
         if args.classifier == 'LightGBM':
             clf = LGBMClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500, learning_rate=0.05)
+        elif args.classifier == 'LogisticRegression':
+            clf = LogisticRegression(random_state=args.random_state, max_iter=1000)
+        elif args.classifier == 'RF':
+            clf = RandomForestClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500)
+        elif args.classifier == 'XGB':
+            clf = XGBClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500, learning_rate=0.05, eval_metric='logloss')
+        elif args.classifier == 'SVM':
+            clf = SVC(random_state=args.random_state, probability=True) # probability=True is needed for predict_proba
+        elif args.classifier == 'KNN':
+            clf = KNeighborsClassifier(n_jobs=12)
+        elif args.classifier == 'ET':
+            clf = ExtraTreesClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500)
+        elif args.classifier == 'ADA':
+            clf = AdaBoostClassifier(random_state=args.random_state, n_estimators=200)
+        elif args.classifier == 'MLP':
+            clf = MLPClassifier(random_state=args.random_state, max_iter=1000)
         else:
             clf = DecisionTreeClassifier(random_state=args.random_state)
 
+        # <-- Updated ASMOTE initialization logic to handle the new internal classifiers
         if args.technique == 'ASMOTE':
             if args.classifier == 'LightGBM':
                 tech = ASMOTE(random_state=args.random_state, clf=LGBMClassifier(random_state=args.random_state))
+            elif args.classifier == 'LogisticRegression':
+                internal_lr_pipe = make_pipeline(StandardScaler(), LogisticRegression(random_state=args.random_state, max_iter=2000))
+                tech = ASMOTE(random_state=args.random_state, clf=internal_lr_pipe)
+            elif args.classifier == 'RF':
+                tech = ASMOTE(random_state=args.random_state, clf=RandomForestClassifier(random_state=args.random_state))
+            elif args.classifier == 'XGB':
+                tech = ASMOTE(random_state=args.random_state, clf=XGBClassifier(random_state=args.random_state, eval_metric='logloss'))
+            elif args.classifier == 'SVM':
+                internal_svm_pipe = make_pipeline(StandardScaler(), SVC(random_state=args.random_state, probability=True))
+                tech = ASMOTE(random_state=args.random_state, clf=internal_svm_pipe)
+            elif args.classifier == 'KNN':
+                internal_knn_pipe = make_pipeline(StandardScaler(), KNeighborsClassifier())
+                tech = ASMOTE(random_state=args.random_state, clf=internal_knn_pipe)
+            elif args.classifier == 'ET':
+                tech = ASMOTE(random_state=args.random_state, clf=ExtraTreesClassifier(random_state=args.random_state))
+            elif args.classifier == 'ADA':
+                tech = ASMOTE(random_state=args.random_state, clf=AdaBoostClassifier(random_state=args.random_state))
+            elif args.classifier == 'MLP':
+                internal_mlp_pipe = make_pipeline(StandardScaler(), MLPClassifier(random_state=args.random_state, max_iter=1000))
+                tech = ASMOTE(random_state=args.random_state, clf=internal_mlp_pipe)
             else:
                 tech = ASMOTE(random_state=args.random_state, clf=DecisionTreeClassifier(random_state=args.random_state))
 
@@ -84,16 +130,39 @@ def ten_folds(file_name, level, k_fold=10):
         elif args.technique == 'ENN':
             tech = EditedNearestNeighbours()
 
-        X_train_resample, y_train_resample = tech.fit_resample(X_train, y_train)
+        # 1. Cleanly impute missing values using the training median to prevent leakage
+        fill_values = X_train.median()
+        X_train_clean = X_train.fillna(fill_values)
+        X_test_clean = X_test.fillna(fill_values)
 
+        # 2. Scale features only if using LogisticRegression, SVM, KNN, MLP, or ASMOTE (all distance-sensitive)
+        distance_sensitive_models = ['LogisticRegression', 'SVM', 'KNN', 'MLP']
+        if args.classifier in distance_sensitive_models or args.technique == 'ASMOTE':
+            scaler = StandardScaler()
+            X_train_processed = pd.DataFrame(scaler.fit_transform(X_train_clean), columns=X_train.columns)
+            X_test_processed = scaler.transform(X_test_clean)
+        else:
+            X_train_processed = X_train_clean.copy()
+            X_test_processed = X_test_clean.copy()
+
+        # 3. Apply the resampler on the processed training data
+        X_train_resample, y_train_resample = tech.fit_resample(X_train_processed, y_train)
+
+        # 4. Train the model on resampled data
         clf.fit(X_train_resample, y_train_resample)
 
-        # predict
-        y_pred = clf.predict(X_test)
-        y_pred_prob = clf.predict_proba(X_test)[:, 1]
+        # 5. Predict using the correctly processed test set
+        y_pred = clf.predict(X_test_processed)
+        y_pred_prob = clf.predict_proba(X_test_processed)[:, 1]
 
-        # record importances
-        importance = clf.feature_importances_
+        # record importances (applicable models will be checked dynamically)
+        if hasattr(clf, 'feature_importances_'):
+            importance = clf.feature_importances_
+        elif hasattr(clf, 'coef_'):
+            importance = np.abs(clf.coef_[0])
+        else:
+            importance = np.zeros(X_train.shape[1])
+
         feature_importances.append(importance)
 
         # calculate metrics
@@ -131,6 +200,8 @@ def ten_folds(file_name, level, k_fold=10):
 def normalize_list(lst):
     min_value = min(lst)
     max_value = max(lst)
+    if max_value == min_value:
+        return [0.0 for x in lst]
     return [(x - min_value) / (max_value - min_value) for x in lst]
 
 parser = get_parser()
@@ -150,10 +221,6 @@ for project in projects:
         times.append(t)
         importances.append(i)
     latex_matrix.append(latex_line)
-
-
-# for importance in importances:
-#     print(importance)
 
 avgs = avgEachColumn(latex_matrix)
 matrix = insertRow(latex_matrix, avgs, len(latex_matrix))
