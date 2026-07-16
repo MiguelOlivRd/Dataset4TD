@@ -1,4 +1,5 @@
 import sys
+from sklearn.calibration import CalibratedClassifierCV
 sys.path.append("..")
 from project_Info import *
 from LatexTable import *
@@ -78,7 +79,8 @@ def ten_folds(file_name, level, k_fold=10):
         elif args.classifier == 'XGB':
             clf = XGBClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500, learning_rate=0.05, eval_metric='logloss')
         elif args.classifier == 'SVM':
-            clf = SVC(random_state=args.random_state, probability=True) # probability=True is needed for predict_proba
+            # Wrap SVC with CalibratedClassifierCV to get probabilities without the deprecation warning
+            clf = CalibratedClassifierCV(SVC(random_state=args.random_state), ensemble=False)
         elif args.classifier == 'KNN':
             clf = KNeighborsClassifier(n_jobs=12)
         elif args.classifier == 'ET':
@@ -102,7 +104,9 @@ def ten_folds(file_name, level, k_fold=10):
             elif args.classifier == 'XGB':
                 tech = ASMOTE(random_state=args.random_state, clf=XGBClassifier(random_state=args.random_state, eval_metric='logloss'))
             elif args.classifier == 'SVM':
-                internal_svm_pipe = make_pipeline(StandardScaler(), SVC(random_state=args.random_state, probability=True))
+                # Replaces the internal probability=True pipeline
+                internal_svm = CalibratedClassifierCV(SVC(random_state=args.random_state), ensemble=False)
+                internal_svm_pipe = make_pipeline(StandardScaler(), internal_svm)
                 tech = ASMOTE(random_state=args.random_state, clf=internal_svm_pipe)
             elif args.classifier == 'KNN':
                 internal_knn_pipe = make_pipeline(StandardScaler(), KNeighborsClassifier())
@@ -139,8 +143,9 @@ def ten_folds(file_name, level, k_fold=10):
         distance_sensitive_models = ['LogisticRegression', 'SVM', 'KNN', 'MLP']
         if args.classifier in distance_sensitive_models or args.technique == 'ASMOTE':
             scaler = StandardScaler()
+            # Wrap scaler output back into a DataFrame with columns to preserve feature names
             X_train_processed = pd.DataFrame(scaler.fit_transform(X_train_clean), columns=X_train.columns)
-            X_test_processed = scaler.transform(X_test_clean)
+            X_test_processed = pd.DataFrame(scaler.transform(X_test_clean), columns=X_test.columns)
         else:
             X_train_processed = X_train_clean.copy()
             X_test_processed = X_test_clean.copy()
