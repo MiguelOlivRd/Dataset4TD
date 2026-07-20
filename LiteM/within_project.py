@@ -140,7 +140,7 @@ def ten_folds(file_name, level, k_fold=10):
         if args.classifier in distance_sensitive_models or args.technique == 'ASMOTE':
             scaler = StandardScaler()
             X_train_processed = pd.DataFrame(scaler.fit_transform(X_train_clean), columns=X_train.columns)
-            X_test_processed = scaler.transform(X_test_clean)
+            X_test_processed = pd.DataFrame(scaler.transform(X_test_clean), columns=X_test_clean.columns)
         else:
             X_train_processed = X_train_clean.copy()
             X_test_processed = X_test_clean.copy()
