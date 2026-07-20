@@ -26,7 +26,7 @@ from utils import cal_metrics
 def get_parser():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--technique', choices=['ADASYN', 'ASMOTE', 'NoSMOTE', 'SMOTE', 'RUS', 'TL', 'ENN'], default='ENN', help='Data augmentation technique to use')
+    parser.add_argument('--technique', choices=['ADASYN', 'ASMOTE', 'NoSMOTE', 'SMOTE', 'RUS', 'TL', 'ENN'], default='ASMOTE', help='Data augmentation technique to use')
     # <-- Updated choices to include the 5 new models: SVM, KNN, ET, ADA, MLP
     parser.add_argument('--classifier', type=str, choices=['LightGBM', 'DecisionTree', 'LogisticRegression', 'RF', 'XGB', 'SVM', 'KNN', 'ET', 'ADA', 'MLP'], default='LightGBM')    
     parser.add_argument('--label_column_name', type=str, default='CommentsAssociatedLabel')

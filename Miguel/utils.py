@@ -1,5 +1,8 @@
+import os
 import re
+import glob
 import pandas as pd
+
 
 def parse_rq3_table(file_path):
     """Reads a LaTeX table from a file and parses it into a clean Pandas DataFrame."""
@@ -93,3 +96,50 @@ def parse_rq3_table(file_path):
 
     df = pd.DataFrame(df_list)
     return df.iloc[:-3]  # Deletes the last 3 rows
+
+
+def clean_cell(text):
+    """Removes LaTeX commands, backslashes, percent signs, and whitespace."""
+    # Remove LaTeX commands like \textbf{...} but keep the inner text
+    text = re.sub(r"\\textbf\{([^}]+)\}", r"\1", text)
+    # Remove other LaTeX commands like \enspace, \\
+    text = re.sub(r"\\[a-zA-Z]+", "", text)
+    # Remove leftover backslashes, percent signs, and extra whitespace
+    text = text.replace("\\", "").replace("%", "").strip()
+    return text
+
+
+def parse_within_project_file(filepath):
+    """Parses a single file and extracts F1-scores for all granularities."""
+    data = []
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or "&" not in line:
+                continue
+
+            # Split the row by the LaTeX column separator
+            parts = [clean_cell(p) for p in line.split("&")]
+
+            # Ensure we have a valid data row (1 project name + 20 metrics)
+            if len(parts) < 21:
+                continue
+
+            project_name = parts[0]
+
+            # F1-scores are at indices 2 (File), 7 (Class), 12 (Method), and 17 (Block)
+            try:
+                f1_scores = {
+                    "Project": project_name,
+                    "File_F1": float(parts[2]),
+                    "Class_F1": float(parts[7]),
+                    "Method_F1": float(parts[12]),
+                    "Block_F1": float(parts[17]),
+                }
+                data.append(f1_scores)
+            except ValueError:
+                # Skip rows where parsing to float fails (e.g., table headers)
+                continue
+
+    return pd.DataFrame(data)
