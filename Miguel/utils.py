@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
+@DeprecationWarning
 def parse_rq3_table(file_path):
     """Reads a LaTeX table from a file and parses it into a clean Pandas DataFrame."""
     with open(file_path, "r", encoding="utf-8") as f:
@@ -98,7 +99,7 @@ def parse_rq3_table(file_path):
     df = pd.DataFrame(df_list)
     return df.iloc[:-3]  # Deletes the last 3 rows
 
-
+@DeprecationWarning
 def clean_cell(text):
     """Removes LaTeX commands, backslashes, percent signs, and whitespace."""
     # Remove LaTeX commands like \textbf{...} but keep the inner text
@@ -109,7 +110,7 @@ def clean_cell(text):
     text = text.replace("\\", "").replace("%", "").strip()
     return text
 
-
+@DeprecationWarning
 def parse_within_project_file(filepath):
     """Parses a single file and extracts F1-scores for all granularities."""
     data = []
@@ -146,7 +147,7 @@ def parse_within_project_file(filepath):
     return pd.DataFrame(data)
 
 
-def read_data(GRANULARITIES, DF_FOLDER_PATH, PROJECTS):
+def read_code_snippets_data(GRANULARITIES, DF_FOLDER_PATH, PROJECTS):
 
     def find_file(folder_path, prefix):
         # folder.glob('prefix*') looks for anything starting with the prefix
@@ -170,3 +171,75 @@ def read_data(GRANULARITIES, DF_FOLDER_PATH, PROJECTS):
             data[granularity][project_name] = project_df
 
     return data
+
+
+# private
+def clean_cell(text):
+    """Removes LaTeX specific formatting elements."""
+    text = re.sub(r"\\textbf\{([^}]+)\}", r"\1", text)
+    text = re.sub(r"\\[a-zA-Z]+", "", text)
+    return text.replace("\\", "").replace("%", "").strip()
+
+
+# private
+def parse_file_metrics(filepath, shift = 0):
+    """Parses a file, normalizes decimal/percentage formats, and drops averages."""
+    rows = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or "&" not in line:
+                continue
+
+            parts = [clean_cell(p) for p in line.split("&")]
+            if len(parts) < 21:
+                continue
+
+            if parts[0].lower() == "average":
+                continue
+
+            try:
+                
+                # Corrected indices for F1-score: 3, 8, 13, 18
+                raw_file = float(parts[3 +  shift])
+                raw_class = float(parts[8 + shift])
+                raw_method = float(parts[13 + shift])
+                raw_block = float(parts[18 + shift])
+
+                # Normalize everything to a 0-100% scale
+                # If a value is <= 1.0 (and not explicitly 0), it's treated as a decimal
+                file_f1 = raw_file * 100 if 0 < raw_file <= 1.0 else raw_file
+                class_f1 = raw_class * 100 if 0 < raw_class <= 1.0 else raw_class
+                method_f1 = (
+                    raw_method * 100 if 0 < raw_method <= 1.0 else raw_method
+                )
+                block_f1 = (
+                    raw_block * 100 if 0 < raw_block <= 1.0 else raw_block
+                )
+
+                rows.append(
+                    {
+                        "Project": parts[0],
+                        "File": file_f1,
+                        "Class": class_f1,
+                        "Method": method_f1,
+                        "Block": block_f1,
+                    }
+                )
+            except ValueError:
+                continue
+    return pd.DataFrame(rows)
+
+
+def load_all_models_results(folder_path: str, prefix="within_project_", shift = 0):
+    """Discovers files and pairs model names with their extracted dataframes."""
+    datasets = {}
+    search_path = os.path.join(folder_path, f"{prefix}*")
+    for filepath in glob.glob(search_path):
+        filename = os.path.basename(filepath)
+        model_name = filename.replace(prefix, "").replace(".txt", "")
+
+        df = parse_file_metrics(filepath, shift=shift)
+        if not df.empty:
+            datasets[model_name] = df
+    return datasets

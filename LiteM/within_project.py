@@ -27,6 +27,8 @@ from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, AdaBo
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.linear_model import RidgeClassifier
 
+from sklearn.base import clone
+
 def get_parser():
     parser = argparse.ArgumentParser()
 
@@ -37,6 +39,98 @@ def get_parser():
     parser.add_argument('--random_state', type=int, default=1)
 
     return parser
+
+
+
+def create_classifier(name : str, random_state : int):
+    classifiers = {
+        'LightGBM': LGBMClassifier(
+            random_state=random_state,
+            n_jobs=12,
+            n_estimators=500,
+            learning_rate=0.05,
+            verbosity=-1
+        ),
+        'NaiveBayes': GaussianNB(),
+        'LDA': LinearDiscriminantAnalysis(),
+        'LogisticRegression': LogisticRegression(
+            random_state=random_state,
+            max_iter=1000,
+        ),
+        'Ridge': RidgeClassifier(random_state=random_state),
+        'RF': RandomForestClassifier(
+            random_state=random_state,
+            n_jobs=12,
+            n_estimators=500,
+        ),
+        'XGB': XGBClassifier(
+            random_state=random_state,
+            n_jobs=12,
+            n_estimators=500,
+            learning_rate=0.05,
+            eval_metric='logloss',
+        ),
+        'SVM': SVC(
+            random_state=random_state,
+            probability=True,
+        ),
+        'KNN': KNeighborsClassifier(n_jobs=12),
+        'ET': ExtraTreesClassifier(
+            random_state=random_state,
+            n_jobs=12,
+            n_estimators=500,
+        ),
+        'ADA': AdaBoostClassifier(
+            random_state=random_state,
+            n_estimators=200,
+        ),
+        'MLP': MLPClassifier(
+            random_state=random_state,
+            max_iter=1000,
+        ),
+        'DecisionTree': DecisionTreeClassifier(
+            random_state=random_state,
+        ),
+    }
+
+    return clone(classifiers.get(name, classifiers['DecisionTree']))
+
+def create_asmote_classifier(name, random_state):
+    classifiers = {
+            'LightGBM': LGBMClassifier(random_state=random_state, verbosity=-1),
+            'NaiveBayes': GaussianNB(),
+            'LDA': LinearDiscriminantAnalysis(),
+            'LogisticRegression': LogisticRegression(
+                random_state=random_state,
+                max_iter=2000,
+            ),
+            'Ridge': RidgeClassifier(random_state=random_state),
+            'RF': RandomForestClassifier(random_state=random_state),
+            'XGB': XGBClassifier(
+                random_state=random_state, 
+                eval_metric='logloss'
+            ),
+            'SVM': SVC(
+                random_state=random_state,
+                probability=True,
+            ),
+            'KNN': KNeighborsClassifier(),
+            'ET': ExtraTreesClassifier(
+                random_state=random_state
+            ),
+            'ADA': AdaBoostClassifier(
+                random_state=random_state
+            ),
+            'MLP': MLPClassifier(
+                random_state=random_state,
+                max_iter=1000,
+            ),
+            'DecisionTree': DecisionTreeClassifier(
+                random_state=random_state,
+            ),
+        }
+    
+    return clone(classifiers.get(name, classifiers['DecisionTree']))
 
 # ten folds cross validation
 def ten_folds(file_name, level, k_fold=10):
@@ -66,76 +160,18 @@ def ten_folds(file_name, level, k_fold=10):
     feature_importances = []
     AUCs = []
     MCCs = []
-    
+    X = X.fillna(-1)
     for train_index, test_index in skf.split(X, y):
         # label evenly distributed
         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
-        # <-- Updated main classifier initialization logic with 5 new models
-        if args.classifier == 'LightGBM':
-            clf = LGBMClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500, learning_rate=0.05)
-        elif args.classifier == 'NaiveBayes':
-            # No scaler strictly required, but handles continuous data assuming a normal distribution
-            clf=GaussianNB()
-        elif args.classifier == 'LDA':
-            clf= LinearDiscriminantAnalysis()
-        elif args.classifier == 'LogisticRegression':
-            clf = LogisticRegression(random_state=args.random_state, max_iter=1000)
-        elif args.classifier == 'Ridge':
-            clf =  RidgeClassifier(random_state=args.random_state)
-        elif args.classifier == 'RF':
-            clf = RandomForestClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500)
-        elif args.classifier == 'XGB':
-            clf = XGBClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500, learning_rate=0.05, eval_metric='logloss')
-        elif args.classifier == 'SVM':
-            clf = SVC(random_state=args.random_state, probability=True) # probability=True is needed for predict_proba
-        elif args.classifier == 'KNN':
-            clf = KNeighborsClassifier(n_jobs=12)
-        elif args.classifier == 'ET':
-            clf = ExtraTreesClassifier(random_state=args.random_state, n_jobs=12, n_estimators=500)
-        elif args.classifier == 'ADA':
-            clf = AdaBoostClassifier(random_state=args.random_state, n_estimators=200)
-        elif args.classifier == 'MLP':
-            clf = MLPClassifier(random_state=args.random_state, max_iter=1000)
-        else:
-            clf = DecisionTreeClassifier(random_state=args.random_state)
+        # Prediction Classifier
+        clf = create_classifier(name=args.classifier, random_state=args.random_state)
 
-        # <-- Updated ASMOTE initialization logic to handle the new internal classifiers
+        # Resample technique
         if args.technique == 'ASMOTE':
-            if args.classifier == 'LightGBM':
-                tech = ASMOTE(random_state=args.random_state, clf=LGBMClassifier(random_state=args.random_state))
-            elif args.classifier == 'NaiveBayes':
-                tech = ASMOTE(random_state=args.random_state, clf=GaussianNB())
-            elif args.classifier == 'LDA':
-                # internal_lda_pipe = make_pipeline(StandardScaler(), LinearDiscriminantAnalysis())
-                tech = ASMOTE(random_state=args.random_state, clf=LinearDiscriminantAnalysis())
-            elif args.classifier == 'Ridge':
-                # internal_ridge_pipe = make_pipeline(StandardScaler(), RidgeClassifier(random_state=args.random_state))
-                tech = ASMOTE(random_state=args.random_state, clf= RidgeClassifier(random_state=args.random_state))
-            elif args.classifier == 'LogisticRegression':
-                # internal_lr_pipe = make_pipeline(StandardScaler(), LogisticRegression(random_state=args.random_state, max_iter=2000))
-                tech = ASMOTE(random_state=args.random_state, clf= LogisticRegression(random_state=args.random_state, max_iter=2000))
-            elif args.classifier == 'RF':
-                tech = ASMOTE(random_state=args.random_state, clf=RandomForestClassifier(random_state=args.random_state))
-            elif args.classifier == 'XGB':
-                tech = ASMOTE(random_state=args.random_state, clf=XGBClassifier(random_state=args.random_state, eval_metric='logloss'))
-            elif args.classifier == 'SVM':
-                # internal_svm_pipe = make_pipeline(StandardScaler(), SVC(random_state=args.random_state, probability=True))
-                tech = ASMOTE(random_state=args.random_state, clf=SVC(random_state=args.random_state, probability=True))
-            elif args.classifier == 'KNN':
-                # internal_knn_pipe = make_pipeline(StandardScaler(), KNeighborsClassifier())
-                tech = ASMOTE(random_state=args.random_state, clf=KNeighborsClassifier())
-            elif args.classifier == 'ET':
-                tech = ASMOTE(random_state=args.random_state, clf=ExtraTreesClassifier(random_state=args.random_state))
-            elif args.classifier == 'ADA':
-                tech = ASMOTE(random_state=args.random_state, clf=AdaBoostClassifier(random_state=args.random_state))
-            elif args.classifier == 'MLP':
-                # internal_mlp_pipe = make_pipeline(StandardScaler(), MLPClassifier(random_state=args.random_state, max_iter=1000))
-                tech = ASMOTE(random_state=args.random_state, clf=MLPClassifier(random_state=args.random_state, max_iter=1000))
-            else:
-                tech = ASMOTE(random_state=args.random_state, clf=DecisionTreeClassifier(random_state=args.random_state))
-
+            tech = ASMOTE(random_state=args.random_state, clf=create_asmote_classifier(name = args.classifier, random_state=args.random_state))
         elif args.technique == 'ADASYN':
             tech = ADASYN(random_state=args.random_state)
         elif args.technique == 'SMOTE':
@@ -149,22 +185,24 @@ def ten_folds(file_name, level, k_fold=10):
         elif args.technique == 'ENN':
             tech = EditedNearestNeighbours()
 
-        # 1. Cleanly impute missing values using the training median to prevent leakage
-        fill_values = X_train.median()
-        X_train_clean = X_train.fillna(fill_values)
-        X_test_clean = X_test.fillna(fill_values)
 
-        # 2. Scale features only if using LogisticRegression, SVM, KNN, MLP, or ASMOTE (all distance-sensitive)
+        # Scale features only if using LogisticRegression, SVM, KNN, MLP, or ASMOTE (all distance-sensitive)
         distance_sensitive_models = ['LogisticRegression', 'SVM', 'KNN', 'MLP', 'LDA', 'Ridge']
-        if args.classifier in distance_sensitive_models or args.technique == 'ASMOTE':
+        if args.classifier in distance_sensitive_models:
             scaler = StandardScaler()
-            X_train_processed = pd.DataFrame(scaler.fit_transform(X_train_clean), columns=X_train.columns)
-            X_test_processed = pd.DataFrame(scaler.transform(X_test_clean), columns=X_test_clean.columns)
+            X_train_processed = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
+            X_test_processed = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
         else:
-            X_train_processed = X_train_clean.copy()
-            X_test_processed = X_test_clean.copy()
+            X_train_processed = X_train.copy()
+            X_test_processed = X_test.copy()
 
-        # 3. Apply the resampler on the processed training data
+        # removing duplicates
+        mask = ~X_test_processed.duplicated()
+
+        X_test_processed = X_test_processed[mask]
+        y_test = y_test[mask]
+
+        # Apply the resampler on the processed training data
         X_train_resample, y_train_resample = tech.fit_resample(X_train_processed, y_train)
 
         # 4. Train the model on resampled data
