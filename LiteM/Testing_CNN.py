@@ -48,6 +48,12 @@ class CNN1DNet(nn.Module):
         x = self.features(x)
         return self.classifier(x)
 
+
+# this is an ugly fix
+# already_printed_device = False
+
+
+
 class CNNClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, epochs=50, batch_size=64, lr=0.001, random_state=1, device=None):
         self.epochs = epochs
@@ -55,8 +61,12 @@ class CNNClassifier(BaseEstimator, ClassifierMixin):
         self.lr = lr
         self.random_state = random_state
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"Using {self.device} as the main device!")
         self.model_ = None
+
+        # this is an ugly fix
+        # if not already_printed_device:
+        #     print(f"Using {self.device} as the main device!")
+        #     already_printed_device = True
 
     def _set_seed(self):
         torch.manual_seed(self.random_state)
