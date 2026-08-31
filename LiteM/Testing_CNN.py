@@ -55,6 +55,7 @@ class CNNClassifier(BaseEstimator, ClassifierMixin):
         self.lr = lr
         self.random_state = random_state
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Using {self.device} as the main device!")
         self.model_ = None
 
     def _set_seed(self):
